@@ -1,0 +1,289 @@
+
+#include <Keypad.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <MPU6050_tockn.h>
+// include encoder library
+#include <Encoder.h>
+
+#define I2C_SLAVE_ADDR 0x04  // 4 in hexadecimal
+#define TRIG_PIN 26          // ESP32 pin GIOP26 connected to Ultrasonic Sensor's TRIG pin
+#define ECHO_PIN 25          // ESP32 pin GIOP25 connected to Ultrasonic Sensor's ECHO pin
+
+MPU6050 mpu6050(Wire);
+float duration_us, distance_cm;
+
+int LMS;
+int RMS;
+int Angle;
+
+// set the LCD number of columns and rows
+int lcdColumns = 16;
+int lcdRows = 2;
+
+const byte ROWS = 4;  //four rows
+const byte COLS = 3;  //three columns
+char keys[ROWS][COLS] = {
+  { '1', '2', '3' },
+  { '4', '5', '6' },
+  { '7', '8', '9' },
+  { '*', '0', '#' }
+};
+
+byte rowPins[ROWS] = { 5, 17, 16, 4 };  //connect to the row pinouts of the keypad
+byte colPins[COLS] = { 0, 2, 15 };      //connect to the column pinouts of the keypad
+
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+byte ledPin = 16;
+
+boolean blink = false;
+boolean ledPin_state;
+
+LiquidCrystal_I2C lcd(0x27, lcdColumns, lcdRows);
+
+int i = 0;
+char key[20];
+int c_key;
+int j;
+
+void setup() {
+  
+  Wire.begin();
+  Serial.begin(9600);
+  mpu6050.begin();
+  mpu6050.calcGyroOffsets(true);
+  pinMode(TRIG_PIN, OUTPUT);  // set ESP32 pin to output mode
+  pinMode(ECHO_PIN, INPUT);   // set ESP32 pin to input mode
+  
+  keypad.addEventListener(keypadEvent); //add an event listener for this keypad
+ 
+  // initialize LCD
+  lcd.init();
+  // turn on LCD backlight
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  // print message
+  lcd.print("Enter commands");
+  delay(1000);
+  lcd.clear();
+
+//Storing commands 
+  for (i = 0; i < 20; i++) {
+    key[i] = keypad.waitForKey();
+    Serial.print("key (");
+    Serial.print(i);
+    Serial.print(")  = ");
+    Serial.println(key[i]);
+    lcd.setCursor(0, 0);
+    lcd.print(key[i]);
+    delay(200);
+    lcd.clear();
+  }
+}
+void loop() {
+
+//----------CODE FOR ENCODER - START--------- //
+    // Request data from the slave
+  Wire.requestFrom(I2C_SLAVE_ADDR, 4);
+
+  // Wait for the data to be available
+  while (Wire.available() < 4) {
+    // Do nothing
+  }
+
+  // Read the sensor value from the slave
+  int encoder1 = Wire.read();
+  int encoder2 = Wire.read();
+
+  // Output the sensor value to the serial monitor
+  Serial.print("enc1_count: ");
+  Serial.println(encoder1);
+  Serial.print("enc2_count: ");
+  Serial.println(encoder2);
+
+  // Delay for a short period before requesting data again
+  delay(100);
+//----------CODE FOR ENCODER - END------------ //
+  lcd.setCursor(0, 0);
+  // print message
+  lcd.print("F(2), B(8), S(0)");
+  delay(100);
+  // clears the display to print new message
+  lcd.clear();
+  // set cursor to first column, second row
+  lcd.setCursor(0, 1);
+  lcd.print("CW(6), ACW(4)");
+  delay(100);
+  lcd.clear();
+  for (j = 0; j < 20; i++) {
+    c_key = key[j];
+    Serial.print("key2 (");
+    Serial.print(j);
+    Serial.print(")  = ");
+    Serial.println(key[j]);
+  }
+}
+
+//Taking care of some special events.
+void keypadEvent(KeypadEvent c_key) {
+  switch (keypad.getState()) {
+    case PRESSED:
+
+      // Wait for the data to be available
+      while (key[19] == '#') {
+    // Do nothing
+  }
+      if (c_key == '2') {
+        // digitalWrite(ledPin, !digitalRead(ledPin));
+        // ledPin_state = digitalRead(ledPin);  // Remember LED state, lit or unlit.
+        lcd.setCursor(0, 0);
+        // print message
+        lcd.print("Going Forward");
+        delay(1000);
+        lcd.clear();
+        moveSteering_90();
+        delay(100);
+        goforward();
+        delay(1000);
+      } else if (c_key == '8') {
+        lcd.setCursor(0, 0);
+        // print message
+        lcd.print("Going Backward");
+        delay(1000);
+        lcd.clear();
+        moveSteering_90();
+        delay(100);
+        gobackward();
+        delay(1000);
+      } else if (c_key == '6') {
+        lcd.setCursor(0, 0);
+        // print message
+        lcd.print("Turn Clockwise");
+        delay(1000);
+        lcd.clear();
+        moveSteering_135();
+        //delay(100);
+        MPU_angle();
+        while (MPU_angle() < 180) {  // make the car turn 90 degrees
+        /
+          moveSteering();
+          TurnClockwise();
+          transmission();
+          MPU_angle();
+        }
+      } else if (c_key == '4') {
+        lcd.setCursor(0, 0);
+        // print message
+        lcd.print("Turn Anti-Clockwise");
+        delay(1000);
+        lcd.clear();
+        moveSteering();
+        // delay(100);
+        MPU_angle();
+        while (MPU_angle() < 90) {  // make the car turn 90 degrees
+          moveSteering();
+          TurnAntiClockwise();
+          transmission();
+          MPU_angle();
+        }
+        moveSteering_90();  // stop the motors
+        delay(3000);
+      } else if (c_key == '0') {
+        lcd.setCursor(0, 0);
+        // print message
+        lcd.print("Stop");
+        delay(1000);
+        lcd.clear();
+        moveSteering_90();  // stop the motors
+        delay(3000);
+      }
+      transmission();
+      break;
+
+}
+void transmission() {
+  int x = LMS;
+  int y = RMS;
+  int z = Angle;
+
+  Wire.beginTransmission(I2C_SLAVE_ADDR);
+
+  Wire.write((byte)((x & 0x0000FF00) >> 8));
+  Wire.write((byte)(x & 0x000000FF));
+  Wire.write((byte)((y & 0x0000FF00) >> 8));
+  Wire.write((byte)(y & 0x000000FF));
+  Wire.write((byte)((z & 0x0000FF00) >> 8));
+  Wire.write((byte)(z & 0x000000FF));
+
+  Wire.endTransmission();
+}
+
+int HC_Distance() {
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  duration_us = pulseIn(ECHO_PIN, HIGH);
+  distance_cm = 0.017 * duration_us;
+
+  Serial.print("distance: ");
+  Serial.print(distance_cm);
+  Serial.println(" cm");
+  return (distance_cm);
+}
+
+int MPU_angle() {
+  mpu6050.update();
+  Serial.println();
+  // Serial.print("MPU_angle = ");
+  // Serial.println(mpu6050.getAngleZ());
+  return (mpu6050.getAngleZ());
+}
+void moveSteering() {
+  LMS = 0;     // stop the left motor
+  RMS = 0;     // stop the right motor
+  Angle = 45;  // servo angle = 45
+}
+void moveSteering_135() {
+  LMS = 0;      // stop the left motor
+  RMS = 0;      // stop the right motor
+  Angle = 135;  // servo angle = 45
+}
+void moveSteering_90() {
+  LMS = 0;     // stop the left motor
+  RMS = 0;     // stop the right motor
+  Angle = 94;  // servo angle = 90
+}
+void goforward() {
+  LMS = 130;
+  RMS = 145;
+  Angle = 90;
+}
+void gobackward() {
+  LMS = -160;
+  RMS = -160;
+  Angle = 90;
+}
+void TurnClockwise() {
+  LMS = 130;
+  RMS = 145;
+  Angle = 135;
+}
+void TurnAntiClockwise() {
+  LMS = 130;
+  RMS = 145;
+  Angle = 45;
+}
+void Encoder(){
+  Wire.requestForm(I2C_SLAVE_ADDR);
+  long newPosition = myEnc.read();
+  // check if encoder has moved
+  if (newPosition != oldPosition) {
+    oldPosition = newPosition;
+
+    count += 1;
+
+    Serial.print("counts: ");
+    Serial.println(count);
+    }
+}
